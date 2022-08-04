@@ -4,6 +4,7 @@ import socket
 import os
 import uasyncio
 import re
+import uasyncio
 
 MIME_TYPES = {
     '.html': 'text/html',
@@ -52,23 +53,13 @@ MIME_TYPES = {
 
 class Server:
     
-    def __init__(self, network, break_pin=None):
+    def __init__(self, network):
         
         
         self.network = network
         self.middlewares = []
-        if not network.isconnected():
-            raise NetworkError("network not connected")
-        
-        self.__set_break_button(break_pin)
         
         self.__regex_type = type(re.compile(""))
-    
-    def __set_break_button(self, pin):
-        if pin is not None:
-            self.__break_button = machine.Pin(pin, machine.Pin.IN, machine.Pin.PULL_UP)
-        else:
-            self.__break_button = None
         
     def __route_middleware(self, route, middleware):
         if type(route) is self.__regex_type:
@@ -119,10 +110,12 @@ class Server:
         method_middleware = self.__method_middleware('POST', route_middlware)
         self.middlewares.append(method_middleware)
         
-    def listen(self, ip='0.0.0.0', port=80):
+    async def listen(self, ip='0.0.0.0', port=80):
+        if not self.network.isconnected():
+            raise NetworkError("network not connected")
         self.ip = ip
         self.port = port
-        self.__listen(ip, port)
+        await self.__listen(ip, port)
         
     def static(self, static_file_path):
         def __static (request, response):
@@ -149,63 +142,113 @@ class Server:
                 return MIME_TYPES[extension]
             else:
                 return 'text/html'
-        
+            
+    def __exception_handler(self, loop, context):
+        print("exception")
+        if context["exception"] is uasyncio.CancelledError:
+            print("stopping server")
+            loop.close()
+        else:
+            print(context["exception"])
                     
                        
-    def __listen(self, ip, port):
-        self.__address = socket.getaddrinfo('0.0.0.0', 80)[0][-1]
-        self.__socket = socket.socket()
-        self.__socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.__socket.bind(self.__address)
-        self.__socket.listen(1)
+    async def __listen(self, ip, port):
+        self.__address = socket.getaddrinfo(ip, port)[0][-1]
+#         uasyncio.Loop.set_exception_handler(self.__exception_handler)
+        self.__server = await uasyncio.start_server(self.__handle_request, host = ip, port = port)
         while True:
-            self.__handle_requests()
-            if self.__break_button is not None and self.__break_button.value() == 0:
-                break
+            await uasyncio.sleep(1.0)
         
-            
-    def __handle_requests(self):
-        client, address = self.__socket.accept()
-        request = client.recv(1024)
-        self.__handle_request(client, request)
     
-    def __handle_request(self, client, request):
-        if request == b'': client.close(); return
+    async def __handle_request(self, reader, writer):
+        request = await reader.read(4096)
+        if request is None or request == b'':
+            writer.close()
+            await writer.wait_closed()
+            return
+        
         requestObj = Request(request)
-        responseObj = Response(client)
+        responseObj = Response(writer)
         for middleware in self.middlewares:
             middleware(requestObj, responseObj)
             
-        if not responseObj.has_responded:
+        if not responseObj.__has_responded:
+                responseObj.status('404 Not Found')
                 responseObj.send('404 Not Found')
-                
+        await responseObj.close()  
             
 class Response:
-    def __init__(self, client):
-        self.client = client
-        self.version = 'HTTP/1.0'
-        self.status = '200 OK'
-        self.headers = {
-            'Content-type': 'text/html'
+    def __init__(self, writer):
+        self.writer = writer
+        self.__version = 'HTTP/1.1'
+        self.__status = '200 OK'
+        self.__headers = {
+            'X-Powered-By': ('AB-Server', False),
+            'Content-type': ('text/html', False)
         }
-        self.has_responded = False
+        self.__start_response = False
+        self.__headers_sent = False
+        self.__has_responded = False
                                                 
     def set_header(self, key, value):
-        self.headers[key] = value
+        self.__send_header(key, value)
+        
+    def status(self, status):
+        self.__status = status
+        
+    def set(self, headers):
+        for key, value in headers.items():
+            self.__send_header(key, value)
+            
+    def __send_header(self, key, value):
+        if key in self.__headers and self.__headers[key][1]:
+            raise AlreadyRespondedError("Already sent header")
+        self.__headers[key] = (value, True)
+        header = key + ': ' + value + "\r\n"
+        self.__http_write(header)
+            
+    def __send_headers(self):
+        if self.__headers_sent:
+            raise AlreadyRespondedError("Already sent headers")
+        for key, value in self.__headers.items():
+            if not value[1]:
+                self.__send_header(key, value[0])
+        self.__http_write("\r\n")
+        self.__headers_sent = True
         
     def send(self, content):
-        if(self.has_responded): raise AlreadyRespondedError("Already responded to this request")
-        self.client.send(self.__response_str(content))
-        self.has_responded = True
-        self.client.close()
+        self.write(content)
+        self.end()
         
-    def __response_str(self, content):
-        strList = [' '.join([self.version,self.status])]
-        for key, value in self.headers.items():
-            strList.append(key + ': ' + value)
-        strList.append('') # empty line after headers
-        strList.append(content)
-        return '\r\n'.join(strList) + '\r\n'
+    def write(self, content):
+        if not self.__headers_sent:
+            self.__send_headers()
+        self.__http_write(content)
+        
+    def end(self, content=""):
+        self.write(content)
+        self.write("\r\n")
+        self.__has_responded = True       
+    
+    async def close(self):
+        await self.writer.drain()
+        self.writer.close()
+        await self.writer.wait_closed()
+        
+    def __http_start_response(self):
+        if not self.__start_response:
+            self.__write(' '.join([self.__version, self.__status]) + "\r\n")
+            self.__start_response = True
+        
+    def __http_write(self, data):
+        self.__http_start_response()
+        self.__write(data)
+        
+    def __write(self, data):
+        if self.__has_responded:
+            raise AlreadyRespondedError("Already responded to this request")
+        self.writer.write(data)
+    
     
 class Request:
     def __init__(self, request):
@@ -213,9 +256,10 @@ class Request:
         self.__pass_request()
     
     def __pass_request(self):
-        request_line = self.request.splitlines()[0].split(' ')
-        self.method = request_line[0]
-        self.route = request_line[1].lower()
+        request_parts = self.request.splitlines()[0].split(' ')
+        if len(request_parts) < 2: raise InvalidRequestError("invalid http request")
+        self.method = request_parts[0]
+        self.route = request_parts[1].lower()
            
             
         
@@ -223,6 +267,9 @@ class ABServerError(Exception):
     pass
 
 class NetworkError(ABServerError):
+    pass
+
+class InvalidRequestError (ABServerError):
     pass
 
 class AlreadyRespondedError(ABServerError):
