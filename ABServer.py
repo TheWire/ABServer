@@ -66,9 +66,9 @@ class Server:
             re_route = route
         else:
             re_route = self.__get_re_route(route.lower())
-        def route_middleware(request, response):
+        async def route_middleware(request, response):
             if self.__match_route(re_route, request.route):
-                middleware(request, response)
+                await self.__call_middleware(middleware)(request, response)
         return route_middleware
     
     def __get_re_route(self, route):
@@ -90,14 +90,27 @@ class Server:
             for middleware in args[1:]:
                 self.middlewares.append(self.__route_middleware(args[0], middleware))
         else:
-            for middlware in args:
-                self.middlewares.append(middleware)
+            for middleware in args:
+                self.middlewares.append(self.__call_middleware(middleware))
     
+    def __call_middleware(self, middleware):
+        async def async_middleware(request, response):
+            if iscoroutine(middleware(request, response)):
+                await middleware(request, response)
+        return async_middleware
+            
+            
+        if iscoroutine(middleware):
+            return async_middleware
+        else:
+            return sync_middleware
+        
+        
         
     def __method_middleware(self, method, middleware):
-        def method_middleware(request, response):
+        async def method_middleware(request, response):
             if(request.method == method):
-                middleware(request, response)
+                await middleware(request, response)
         return method_middleware
     
     def get(self, route, middleware):
@@ -129,6 +142,7 @@ class Server:
                     file = open(sanitized_path)
                     response.set_header('Content-type', self.__get_mime(sanitized_path))
                     response.send(file.read())
+                    file.close()
                 os.chdir('..')
         
         return __static
@@ -170,7 +184,7 @@ class Server:
         requestObj = Request(request)
         responseObj = Response(writer)
         for middleware in self.middlewares:
-            middleware(requestObj, responseObj)
+            await middleware(requestObj, responseObj)
             
         if not responseObj.__has_responded:
                 responseObj.status('404 Not Found')
@@ -274,3 +288,10 @@ class InvalidRequestError (ABServerError):
 
 class AlreadyRespondedError(ABServerError):
     pass
+
+
+#helper functions
+
+#good enough to identify awaitable function
+def iscoroutine(obj):
+    return hasattr(obj, "send")
