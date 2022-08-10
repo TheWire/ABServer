@@ -83,7 +83,7 @@ class Server:
     def __match_route(self, re_route, request_route):
         match = re_route.search(request_route)
         if not match: return False
-        return len(request_route) == match.span()[1] - match.span()[0]
+        return len(request_route) == len(match.group(0))
     
     def use(self, *args):
         if type(args[0]) is str or type(args[0]) is self.__regex_type:
@@ -133,25 +133,29 @@ class Server:
     def static(self, static_file_path):
         def __static (request, response):
             if(request.method == 'GET'):
-                file_span = re.search('[A-Za-z0-9_.,%$£-]+$', request.route).span()
-                file_name = request.route[file_span[0]:file_span[1]]
+                file_name = re.search('[A-Za-z0-9_.,%$£-]+$', request.route).group(0)
                 sanitized_path = file_name.replace('..', '')
-                os.chdir(static_file_path)
-                files = os.listdir()
-                if sanitized_path in files:
-                    file = open(sanitized_path)
-                    response.set_header('Content-type', self.__get_mime(sanitized_path))
-                    response.send(file.read())
-                    file.close()
-                os.chdir('..')
+                try:
+                    os.chdir(static_file_path)
+                    files = os.listdir()
+                    if sanitized_path in files:
+                        file = open(sanitized_path)
+                        response.set_header('Content-type', self.__get_mime(sanitized_path))
+                        response.send(file.read())
+                        file.close()
+                    os.chdir('..')
+                except OSError as e:
+                    if e.args[0] == -2:
+                        raise FilePathError("Cannot find static file path")
+                    else:
+                        raise e
         
         return __static
     
     def __get_mime(self, file_name):
         extension_match = re.search('.[A-Za-z0-9]+$', file_name)
         if extension_match is not None:
-            span = extension_match.span()
-            extension = file_name[span[0]:span[1]].lower()
+            extension = extension_match.group(0).lower()
             if extension in MIME_TYPES:
                 return MIME_TYPES[extension]
             else:
@@ -287,6 +291,9 @@ class InvalidRequestError (ABServerError):
     pass
 
 class AlreadyRespondedError(ABServerError):
+    pass
+
+class FilePathError(ABServerError):
     pass
 
 
