@@ -123,6 +123,11 @@ class Server:
         method_middleware = self.__method_middleware('POST', route_middlware)
         self.middlewares.append(method_middleware)
         
+    def put(self, route, middleware):
+        route_middlware = self.__route_middlware(route, middleware)
+        method_middleware = self.__method_middleware('PUT', route_middlware)
+        self.middlewares.append(method_middleware)
+        
     async def listen(self, ip='0.0.0.0', port=80):
         if not self.network.isconnected():
             raise NetworkError("network not connected")
@@ -167,7 +172,8 @@ class Server:
             print("stopping server")
             loop.close()
         else:
-            print(context["exception"])
+            ex = context["exception"]
+
                     
                        
     async def __listen(self, ip, port):
