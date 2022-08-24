@@ -138,6 +138,11 @@ class Server:
         method_middleware = self.__method_middleware('PATCH', route_middlware)
         self.middlewares.append(method_middleware)
         
+    def head(self, route, middleware):
+        route_middlware = self.__route_middlware(route, middleware)
+        method_middleware = self.__method_middleware('HEAD', route_middlware)
+        self.middlewares.append(method_middleware)
+        
     async def listen(self, ip='0.0.0.0', port=80):
         if not self.network.isconnected():
             raise NetworkError("network not connected")
