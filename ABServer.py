@@ -4,7 +4,6 @@ import socket
 import os
 import uasyncio
 import re
-import uasyncio
 
 MIME_TYPES = {
     '.html': 'text/html',
@@ -119,28 +118,28 @@ class Server:
         self.middlewares.append(method_middleware)
         
     def post(self, route, middleware):
-        route_middlware = self.__route_middlware(route, middleware)
-        method_middleware = self.__method_middleware('POST', route_middlware)
+        route_middleware = self.__route_middleware(route, middleware)
+        method_middleware = self.__method_middleware('POST', route_middleware)
         self.middlewares.append(method_middleware)
         
     def put(self, route, middleware):
-        route_middlware = self.__route_middlware(route, middleware)
-        method_middleware = self.__method_middleware('PUT', route_middlware)
+        route_middleware = self.__route_middleware(route, middleware)
+        method_middleware = self.__method_middleware('PUT', route_middleware)
         self.middlewares.append(method_middleware)
         
     def delete(self, route, middleware):
-        route_middlware = self.__route_middlware(route, middleware)
-        method_middleware = self.__method_middleware('DELETE', route_middlware)
+        route_middleware = self.__route_middleware(route, middleware)
+        method_middleware = self.__method_middleware('DELETE', route_middleware)
         self.middlewares.append(method_middleware)
         
     def patch(self, route, middleware):
-        route_middlware = self.__route_middlware(route, middleware)
-        method_middleware = self.__method_middleware('PATCH', route_middlware)
+        route_middleware = self.__route_middleware(route, middleware)
+        method_middleware = self.__method_middleware('PATCH', route_middleware)
         self.middlewares.append(method_middleware)
         
     def head(self, route, middleware):
-        route_middlware = self.__route_middlware(route, middleware)
-        method_middleware = self.__method_middleware('HEAD', route_middlware)
+        route_middleware = self.__route_middleware(route, middleware)
+        method_middleware = self.__method_middleware('HEAD', route_middleware)
         self.middlewares.append(method_middleware)
         
     async def listen(self, ip='0.0.0.0', port=80):
@@ -160,7 +159,7 @@ class Server:
                     files = os.listdir()
                     if sanitized_path in files:
                         file = open(sanitized_path)
-                        response.set_header('Content-type', self.__get_mime(sanitized_path))
+                        response.set_header('Content-Type', self.__get_mime(sanitized_path))
                         response.send(file.read())
                         file.close()
                     os.chdir('..')
@@ -223,7 +222,7 @@ class Response:
         self.__status = '200 OK'
         self.__headers = {
             'X-Powered-By': ('AB-Server', False),
-            'Content-type': ('text/html', False)
+            'Content-Type': ('text/html', False)
         }
         self.__start_response = False
         self.__headers_sent = False
