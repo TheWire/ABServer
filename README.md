@@ -15,6 +15,7 @@ def home(request, response):
 
 def main():
 
+    # example network connection code
     wifi = network.WLAN(network.STA_IF)
     wifi.connect(secrets.SSID, secrets.PASSWORD)
 
@@ -42,6 +43,14 @@ def middleware(response, request):
 server.use('/path', middleware)
 ```
 
+Middleware paths can be either strings or regex expressions in the form `re.compile("my-expression")`.
+
+### Serve Static Files
+
+```
+server.use('/static_route_, server.static('/static_file_path'))
+```
+
 ### Set Method Middlewares
 
 ```
@@ -51,10 +60,4 @@ server.put("/", middleware)
 server.delete("/", middleware)
 server.patch("/", middleware)
 server.head("/", middleware)
-```
-
-### Serve Static Files
-
-```
-server.use('/static_route_, server.static('/static_file_path'))
 ```
