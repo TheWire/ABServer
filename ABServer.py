@@ -59,6 +59,7 @@ class Server:
         self.middlewares = []
         
         self.__regex_type = type(re.compile(""))
+        self.__server = None
         
     def __route_middleware(self, route, middleware):
         if type(route) is self.__regex_type:
@@ -143,12 +144,24 @@ class Server:
         self.middlewares.append(method_middleware)
         
     async def listen(self, ip='0.0.0.0', port=80):
+        if self.__server != None:
+            raise ABServerError("server already started")
+
         if not self.network.isconnected():
             raise NetworkError("network not connected")
         self.ip = ip
         self.port = port
         await self.__listen(ip, port)
-        
+
+    async def stop(self):
+        if self.__server == None:
+            raise ABServerError("server not started")
+        print("stopping server...")
+        self.__server.close()
+        await self.__server.wait_closed()
+        self.__server = None
+        print("server stopped")
+
     def static(self, static_file_path):
         def __static (request, response):
             if(request.method == 'GET'):
@@ -187,16 +200,14 @@ class Server:
             loop.close()
         else:
             ex = context["exception"]
+            print(ex)
 
                     
                        
     async def __listen(self, ip, port):
         self.__address = socket.getaddrinfo(ip, port)[0][-1]
-#         uasyncio.Loop.set_exception_handler(self.__exception_handler)
+        uasyncio.Loop.set_exception_handler(self.__exception_handler)
         self.__server = await uasyncio.start_server(self.__handle_request, host = ip, port = port)
-        while True:
-            await uasyncio.sleep(1.0)
-        
     
     async def __handle_request(self, reader, writer):
         request = await reader.read(4096)
@@ -230,6 +241,7 @@ class Response:
                                                 
     def set_header(self, key, value):
         self.__send_header(key, value)
+
         
     def status(self, status):
         self.__status = status
@@ -307,7 +319,7 @@ class ABServerError(Exception):
 class NetworkError(ABServerError):
     pass
 
-class InvalidRequestError (ABServerError):
+class InvalidRequestError(ABServerError):
     pass
 
 class AlreadyRespondedError(ABServerError):

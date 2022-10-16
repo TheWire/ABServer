@@ -30,6 +30,11 @@ def main():
 usyncio.run(main())
 ```
 
+### Stop server
+```
+server.stop()
+```
+
 ### Middleware Example
 ```
 def middleware(response, request):
