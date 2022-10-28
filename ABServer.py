@@ -315,30 +315,29 @@ class Response:
     def set(self, headers):
         self.headers.update(headers)
             
-    def __send_header(self, key, value):
-        header = key + ': ' + value + "\r\n"
-        self.__http_write(header)
+    def __http_send_header(self, key, value):
+        header = key + ': ' + value
+        self.__write(header)
+        self.__write("\r\n")
             
-    def __send_headers(self):
-        if self.__headers_sent:
-            raise AlreadyRespondedError("Already sent headers")
+    def __http_send_headers(self):
+        if self.__headers_sent: return
         for key, value in self.headers.items():
-            self.__send_header(key, value)
-        self.__http_write("\r\n")
+            self.__http_send_header(key, value)
         self.__headers_sent = True
+        self.__write("\r\n")
         
     def send(self, content):
-        self.write(content)
+        self.__http_write(content)
         self.end()
         
     def write(self, content):
-        if not self.__headers_sent:
-            self.__send_headers()
+        self.set_header("Transfer-Encoding", "chunked")
+        self.__http_write("%x" % len(content))
         self.__http_write(content)
         
     def end(self, content=""):
-        self.write(content)
-        self.write("\r\n")
+        self.__http_write(content)
         self.__has_responded = True       
     
     async def close(self):
@@ -347,13 +346,15 @@ class Response:
         await self.writer.wait_closed()
         
     def __http_start_response(self):
-        if not self.__start_response:
-            self.__write(' '.join([self.__version, self.__status]) + "\r\n")
-            self.__start_response = True
+        if self.__start_response: return
+        self.__write(' '.join([self.__version, self.__status]) + "\r\n")
+        self.__start_response = True
         
     def __http_write(self, data):
         self.__http_start_response()
+        self.__http_send_headers()
         self.__write(data)
+        self.__write("\r\n")
         
     def __write(self, data):
         if self.__has_responded:
