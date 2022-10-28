@@ -4,6 +4,7 @@ import socket
 import os
 import uasyncio
 import re
+import json
 
 MIME_TYPES = {
     '.html': 'text/html',
@@ -62,28 +63,64 @@ class Server:
         self.__server = None
         
     def __route_middleware(self, route, middleware):
-        if type(route) is self.__regex_type:
-            re_route = route
-        else:
-            re_route = self.__get_re_route(route.lower())
+        route = self.__get_path_parser(route.lower())
+        print(route)
         async def route_middleware(request, response):
-            if self.__match_route(re_route, request.route):
+            ret = self.__match_route(route, request.url_parts)
+            if ret != False:
+                request.params = ret
                 await self.__call_middleware(middleware)(request, response)
         return route_middleware
-    
-    def __get_re_route(self, route):
-        __route = route
 
-        if __route[-1] == '/' and len(__route) > 1:
-            __route += '[A-Za-z0-9_.,%$£-]+'
-        else :
-            __route += '/?'
-        return re.compile(__route)
+    def __get_path_parser(self, path):
+        parts = path.split("/")
+        path_parser = []
+        for part in parts:
+            if part == "": continue
+            params = part.split(":")
+            if len(params) == 1:
+                path_parser.append(params[0])
+                continue
+                
+            param_block = {"path":"", "params": []}
+            if params[0] != "":
+                param_block["path"] = params[0]
+            for param in params[1:]:
+                param_block["params"].append(param)
+            path_parser.append(param_block)
+        return path_parser
+
     
-    def __match_route(self, re_route, request_route):
-        match = re_route.search(request_route)
-        if not match: return False
-        return len(request_route) == len(match.group(0))
+    def __match_route(self, url_parser, request_path):
+        pos = 0
+        params = {}
+        if len(url_parser) != len(request_path): return False
+        for part in url_parser:
+            if pos >= len(request_path): return False
+            if type(part) == dict:
+                ret = self.__parse_params(part, request_path[pos])
+                if ret == False: return False
+                params.update(ret)
+            elif part != request_path[pos]:
+                return False
+            pos += 1
+        return params
+        
+    def __parse_params(self, params, url_part):
+        parsed_params = {}
+        pos = 0
+        if params["path"] != "":
+            pos = url_part.find(params["path"])
+            if pos != 0: return False
+            pos = len(params["path"])
+        for idx, param in enumerate(params["params"]):
+            if pos == len(url_part): return False
+            if idx == len(params["params"]) -1:
+                parsed_params[param] = url_part[pos:]
+            else:
+                parsed_params[param] = url_part[pos]
+            pos += 1
+        return parsed_params
     
     def use(self, *args):
         if type(args[0]) is str or type(args[0]) is self.__regex_type:
@@ -183,6 +220,29 @@ class Server:
                         raise e
         
         return __static
+
+    def json_body_parser(self):
+        def __json(request, response):
+            try: request.body
+            except: request.body = {}
+            
+            if ("Content-Type", MIME_TYPES[".json"]) not in request.headers.items(): return
+
+            try:
+                request.body = json.loads(request.raw_body)
+            except:
+                pass
+        return __json
+
+    def url_encoded_body_parser(self):
+        def __url_encoded(request, response):
+            try: request.body
+            except: request.body = {}
+            request.body = {}
+            if ("Content-Type", "application/x-www-form-urlencoded") not in request.headers.items(): return
+            request.body = parse_query(request.raw_body)
+        return __url_encoded
+
     
     def __get_mime(self, file_name):
         extension_match = re.search('.[A-Za-z0-9]+$', file_name)
@@ -194,13 +254,14 @@ class Server:
                 return 'text/html'
             
     def __exception_handler(self, loop, context):
-        print("exception")
-        if context["exception"] is uasyncio.CancelledError:
+        exception = context["exception"]
+        if exception is uasyncio.CancelledError:
             print("stopping server")
             loop.close()
+        elif type(exception) is OSError and exception.errno == 104:
+            print("socket closed")
         else:
-            ex = context["exception"]
-            print(ex)
+            raise exception
 
                     
                        
@@ -216,8 +277,13 @@ class Server:
             await writer.wait_closed()
             return
         
-        requestObj = Request(request)
         responseObj = Response(writer)
+        try:
+            requestObj = Request(request)
+        except InvalidRequestError as e:
+            responseObj.status('400 Bad Request')
+            responseObj.end()
+
         for middleware in self.middlewares:
             await middleware(requestObj, responseObj)
             
@@ -303,16 +369,59 @@ class Response:
 class Request:
     def __init__(self, request):
         self.request = request.decode()
-        self.__pass_request()
+        self.__parse_request()
     
-    def __pass_request(self):
-        request_parts = self.request.splitlines()[0].split(' ')
-        if len(request_parts) < 2: raise InvalidRequestError("invalid http request")
-        self.method = request_parts[0]
-        self.route = request_parts[1].lower()
-           
-            
-        
+    def __parse_request(self):
+        self.raw_request = self.request.splitlines()
+        if len(self.raw_request) < 2: raise InvalidRequestError("invalid http request")
+
+        self.request_line = self.raw_request[0].split(' ')
+        if len(self.request_line) < 3: raise InvalidRequestError("invalid http request")
+        self.method = self.request_line[0]
+        self.route = self.request_line[1].lower()
+        self.url_parts, query = self.__get_route_parser(self.route)
+        if query != None:
+            self.query = parse_query(query)
+        self.version = self.request_line[2]
+        self.headers = {}
+        header_end = -1
+        for idx, line in enumerate(self.raw_request):
+            if line == "":
+                header_end = idx
+                break
+        if header_end == -1:
+            raise InvalidRequestError("invalid http request")
+        self.headers = self.__parse_headers(self.raw_request[1:header_end])
+        self.raw_body = '\n'.join(self.raw_request[header_end+1:])
+
+    def __get_route_parser(self, route):
+        url_query = route.split("?", 1)
+        parts = list(filter(None, url_query[0].split("/")))
+        if parts[0] == "": parts.remove
+        if len(url_query) > 2:
+            return parts, url_query[1]
+        return parts, None
+
+    def __parse_headers(self, header_block):
+        headers = {}
+        for header in header_block:
+            key, value = self.__parse_header(header)
+            if key == None: continue
+            headers[key] = value
+        return headers
+
+    def __parse_header(self, raw_header):
+        header = raw_header.split(':', 1)
+        if len(header) < 2: return None, None
+        return header[0].strip(), header[1].strip()
+
+    
+
+
+    def __str__(self):
+        return self.request
+
+   
 class ABServerError(Exception):
     pass
 
@@ -334,3 +443,30 @@ class FilePathError(ABServerError):
 #good enough to identify awaitable function
 def iscoroutine(obj):
     return hasattr(obj, "send")
+
+def parse_query(query):
+    params = query.split("&")
+    for param in params:
+        pair = param.split("=", 1)
+        if len(pair) == 1:
+            pair.append("")
+        return (parse_query_string(pair[0]), parse_query_string(pair[1]))
+
+def parse_query_string(string):
+    parsed_string = string
+    for key, value in URL_ESCAPE.items():
+        parsed_string = parsed_string.replace(key, value)
+        parsed_string = parsed_string.replace(key.lower(), value)
+    return parsed_string
+
+URL_ESCAPE = {
+    "%20": " ", "%3C": "<", "%3E": ">", "%23": "#", "%225": "%", "%2B": "+",
+    "%7B": "{", "%7D": "}", "%7C": "|", "%5C": "\\", "%5E": "^", "%7E": "~",
+    "%5B": "[", "%5D": "]", "%60": "‘", "%3B": ";", "%2F": "/", "%3F": "?",
+    "%3A": ":", "%40": "@", "%3D": "=", "%26": "&", "%24": "$",
+}
+
+def sanitize_path(path, strict=False):
+    sanitized_path = path.replace("..", ".")
+    if strict and sanitize_path != path: return ""
+    return sanitize_path
