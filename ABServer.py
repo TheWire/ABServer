@@ -297,38 +297,33 @@ class Response:
         self.writer = writer
         self.__version = 'HTTP/1.1'
         self.__status = '200 OK'
-        self.__headers = {
-            'X-Powered-By': ('AB-Server', False),
-            'Content-Type': ('text/html', False)
+        self.headers = {
+            'X-Powered-By': 'AB-Server',
+            'Content-Type': 'text/html'
         }
         self.__start_response = False
         self.__headers_sent = False
-        self.__has_responded = False
-                                                
+        self.__has_responded = False    
+
     def set_header(self, key, value):
-        self.__send_header(key, value)
+        self.headers[key] = value
 
         
     def status(self, status):
         self.__status = status
         
     def set(self, headers):
-        for key, value in headers.items():
-            self.__send_header(key, value)
+        self.headers.update(headers)
             
     def __send_header(self, key, value):
-        if key in self.__headers and self.__headers[key][1]:
-            raise AlreadyRespondedError("Already sent header")
-        self.__headers[key] = (value, True)
         header = key + ': ' + value + "\r\n"
         self.__http_write(header)
             
     def __send_headers(self):
         if self.__headers_sent:
             raise AlreadyRespondedError("Already sent headers")
-        for key, value in self.__headers.items():
-            if not value[1]:
-                self.__send_header(key, value[0])
+        for key, value in self.headers.items():
+            self.__send_header(key, value)
         self.__http_write("\r\n")
         self.__headers_sent = True
         
