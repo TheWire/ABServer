@@ -5,6 +5,7 @@ import os
 import uasyncio
 import re
 import json
+import gc
 
 MIME_TYPES = {
     '.html': 'text/html',
@@ -64,7 +65,6 @@ class Server:
         
     def __route_middleware(self, route, middleware):
         route = self.__get_path_parser(route.lower())
-        print(route)
         async def route_middleware(request, response):
             ret = self.__match_route(route, request.url_parts)
             if ret != False:
@@ -131,7 +131,9 @@ class Server:
                 self.middlewares.append(self.__call_middleware(middleware))
     
     def __call_middleware(self, middleware):
+
         async def async_middleware(request, response):
+            response.status("200 OK")
             if iscoroutine(middleware(request, response)):
                 await middleware(request, response)
         return async_middleware
@@ -243,6 +245,18 @@ class Server:
             request.body = parse_query(request.raw_body)
         return __url_encoded
 
+    def cors(self):
+        def __cors(request, response):
+            response.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            response.set_header("Access-Control-Allow-Origin", "*")
+            response.set_header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept")
+            if request.method == "OPTIONS":
+                response.set_header("Access-Control-Allow-Origin","*")
+                response.set_header("Access-Control-Allow-Methods","*")
+                response.set_header("Access-Control-Allow-Credentials", "true")
+                response.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        return __cors
+
     
     def __get_mime(self, file_name):
         extension_match = re.search('.[A-Za-z0-9]+$', file_name)
@@ -271,6 +285,7 @@ class Server:
         self.__server = await uasyncio.start_server(self.__handle_request, host = ip, port = port)
     
     async def __handle_request(self, reader, writer):
+        gc.collect()
         request = await reader.read(4096)
         if request is None or request == b'':
             writer.close()
@@ -288,15 +303,14 @@ class Server:
             await middleware(requestObj, responseObj)
             
         if not responseObj.__has_responded:
-                responseObj.status('404 Not Found')
-                responseObj.send('404 Not Found')
+                responseObj.end('404 Not Found')
         await responseObj.close()  
             
 class Response:
     def __init__(self, writer):
         self.writer = writer
         self.__version = 'HTTP/1.1'
-        self.__status = '200 OK'
+        self.__status = '404 Not Found'
         self.headers = {
             'X-Powered-By': 'AB-Server',
             'Content-Type': 'text/html'
@@ -328,7 +342,10 @@ class Response:
         self.__write("\r\n")
         
     def send(self, content):
-        self.__http_write(content)
+        if ("Transfer-Encoding", "chunked") in self.headers.items():
+            self.write(content)
+        else:
+            self.__http_write(content)
         self.end()
         
     def write(self, content):
@@ -337,7 +354,13 @@ class Response:
         self.__http_write(content)
         
     def end(self, content=""):
-        self.__http_write(content)
+        if ("Transfer-Encoding", "chunked") in self.headers.items():
+            if content != "":
+                self.write(content)
+            self.write("")
+        else:
+            self.__http_write(content)
+            self.__http_write("")
         self.__has_responded = True       
     
     async def close(self):
@@ -373,7 +396,7 @@ class Request:
 
         self.request_line = self.raw_request[0].split(' ')
         if len(self.request_line) < 3: raise InvalidRequestError("invalid http request")
-        self.method = self.request_line[0]
+        self.method = self.request_line[0].upper()
         self.route = self.request_line[1].lower()
         self.url_parts, query = self.__get_route_parser(self.route)
         if query != None:
@@ -393,7 +416,6 @@ class Request:
     def __get_route_parser(self, route):
         url_query = route.split("?", 1)
         parts = list(filter(None, url_query[0].split("/")))
-        if parts[0] == "": parts.remove
         if len(url_query) > 2:
             return parts, url_query[1]
         return parts, None
@@ -464,5 +486,5 @@ URL_ESCAPE = {
 
 def sanitize_path(path, strict=False):
     sanitized_path = path.replace("..", ".")
-    if strict and sanitize_path != path: return ""
-    return sanitize_path
+    if strict and sanitized_path != path: return ""
+    return sanitized_path
