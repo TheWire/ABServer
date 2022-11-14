@@ -63,10 +63,10 @@ class Server:
         self.__regex_type = type(re.compile(""))
         self.__server = None
         
-    def __route_middleware(self, route, middleware):
+    def __route_middleware(self, route, middleware, complete_match=True):
         route = self.__get_path_parser(route.lower())
         async def route_middleware(request, response):
-            ret = self.__match_route(route, request.url_parts)
+            ret = self.__match_route(route, request.url_parts, complete_match)
             if ret != False:
                 request.params = ret
                 await self.__call_middleware(middleware)(request, response)
@@ -91,10 +91,10 @@ class Server:
         return path_parser
 
     
-    def __match_route(self, url_parser, request_path):
+    def __match_route(self, url_parser, request_path, complete_match=True):
         pos = 0
         params = {}
-        if len(url_parser) != len(request_path): return False
+        if len(url_parser) != len(request_path) and complete_match: return False
         for part in url_parser:
             if pos >= len(request_path): return False
             if type(part) == dict:
@@ -123,17 +123,15 @@ class Server:
         return parsed_params
     
     def use(self, *args):
-        if type(args[0]) is str or type(args[0]) is self.__regex_type:
+        if type(args[0]) is str:
             for middleware in args[1:]:
-                self.middlewares.append(self.__route_middleware(args[0], middleware))
+                self.middlewares.append(self.__route_middleware(args[0], middleware, False))
         else:
             for middleware in args:
                 self.middlewares.append(self.__call_middleware(middleware))
     
     def __call_middleware(self, middleware):
-
         async def async_middleware(request, response):
-            response.status("200 OK")
             if iscoroutine(middleware(request, response)):
                 await middleware(request, response)
         return async_middleware
@@ -204,23 +202,10 @@ class Server:
     def static(self, static_file_path):
         def __static (request, response):
             if(request.method == 'GET'):
+                #look at this again
                 file_name = re.search('[A-Za-z0-9_.,%$£-]+$', request.route).group(0)
-                sanitized_path = file_name.replace('..', '')
-                try:
-                    os.chdir(static_file_path)
-                    files = os.listdir()
-                    if sanitized_path in files:
-                        file = open(sanitized_path)
-                        response.set_header('Content-Type', self.__get_mime(sanitized_path))
-                        response.send(file.read())
-                        file.close()
-                    os.chdir('..')
-                except OSError as e:
-                    if e.args[0] == -2:
-                        raise FilePathError("Cannot find static file path")
-                    else:
-                        raise e
-        
+                sanitized_path = sanitize_path(file_name)
+                response.send_file(join_path(static_file_path, sanitized_path))
         return __static
 
     def json_body_parser(self):
@@ -255,17 +240,8 @@ class Server:
                 response.set_header("Access-Control-Allow-Methods","*")
                 response.set_header("Access-Control-Allow-Credentials", "true")
                 response.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+                response.end()
         return __cors
-
-    
-    def __get_mime(self, file_name):
-        extension_match = re.search('.[A-Za-z0-9]+$', file_name)
-        if extension_match is not None:
-            extension = extension_match.group(0).lower()
-            if extension in MIME_TYPES:
-                return MIME_TYPES[extension]
-            else:
-                return 'text/html'
             
     def __exception_handler(self, loop, context):
         exception = context["exception"]
@@ -303,6 +279,7 @@ class Server:
             await middleware(requestObj, responseObj)
             
         if not responseObj.__has_responded:
+                responseObj.status("404 Not Found")
                 responseObj.end('404 Not Found')
         await responseObj.close()  
             
@@ -310,7 +287,7 @@ class Response:
     def __init__(self, writer):
         self.writer = writer
         self.__version = 'HTTP/1.1'
-        self.__status = '404 Not Found'
+        self.__status = '200 OK'
         self.headers = {
             'X-Powered-By': 'AB-Server',
             'Content-Type': 'text/html'
@@ -347,6 +324,28 @@ class Response:
         else:
             self.__http_write(content)
         self.end()
+
+    def send_file(self, filepath):
+        try:
+            file = open(filepath, "r")
+            self.set_header('Content-Type', get_mime(filepath))
+            gc.collect()
+            while True:
+                data = file.read(1024)
+                if len(data) == 0:
+                    file.close()
+                    return
+                    
+                self.write(data)
+        except OSError as e:
+            if e.errno == 2:
+                self.status("404 Not Found")
+            else:
+                self.status("500 Internal Server Error")
+        except:
+            self.status("500 Internal Server Error")
+        finally:
+            self.end()
         
     def write(self, content):
         self.set_header("Transfer-Encoding", "chunked")
@@ -484,7 +483,19 @@ URL_ESCAPE = {
     "%3A": ":", "%40": "@", "%3D": "=", "%26": "&", "%24": "$",
 }
 
+def get_mime(file_name):
+    extension_match = re.search('.[A-Za-z0-9]+$', file_name)
+    if extension_match is not None:
+        extension = extension_match.group(0).lower()
+        if extension in MIME_TYPES:
+            return MIME_TYPES[extension]
+        else:
+            return 'text/html'
+
 def sanitize_path(path, strict=False):
     sanitized_path = path.replace("..", ".")
     if strict and sanitized_path != path: return ""
     return sanitized_path
+
+def join_path(*paths):
+    return ("/").join(paths)
