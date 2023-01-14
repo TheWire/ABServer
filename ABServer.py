@@ -1,66 +1,30 @@
-import machine
-import network
 import socket
-import os
 import uasyncio
 import re
 import json
 import gc
 
 MIME_TYPES = {
-    '.html': 'text/html',
-    '.htm': 'text/html',
-    '.css': 'text/css',
-    '.js': 'text/javascript',
-    '.json': 'application/json',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif',
-    '.gz': 'application/gzip',
-    '.csv': 'text/csv',
-    '.bmp': 'image/bmp',
-    '.png': 'image/png',
-    '.pdf': 'application/pdf',
-    '.sh': 'application/x-sh',
-    '.svg': 'image/svg+xml',
-    '.txt': 'text/plain',
-    '.ttf': 'font/ttf',
-    '.wav': 'audio/wav',
-    '.weba': 'audio/webm',
-    '.webm': 'video/webm',
-    '.webp': 'image/webp',
-    '.xhtml': 'application/xhtml+xml',
-    '.xml': 'application/xml',
-    '.zip': 'application/zip',
-    '.ts': 'video/mp2t',
-    '.tif': 'image/tiff',
-    '.tiff': 'image/tiff',
-    '.otf': 'font/otf',
-    '.aac': 'audio/aac',
-    '.rtf': 'application/rtf',
-    '.avi': 'video/x-msvideo',
-    '.bz': 'application/x-bzip',
-    '.bz2': 'application/x-bzip2',
-    '.ico': 'image/vnd.microsoft.icon',
-    '.mid': 'audio/midi',
-    '.midi': 'audio/x-midi',
-    '.bz': 'application/x-bzip',
-    '.bz2': 'application/x-bzip2',
-    '.mp3': 'audio/mpeg',
-    '.mp4': 'video/mp4',
-    '.mpeg': 'video/mpeg',
-    
+    '.html': 'text/html', '.htm': 'text/html', '.css': 'text/css', '.js': 'text/javascript',
+    '.json': 'application/json', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
+    '.gz': 'application/gzip', '.csv': 'text/csv', '.bmp': 'image/bmp', '.png': 'image/png',
+    '.pdf': 'application/pdf', '.sh': 'application/x-sh', '.svg': 'image/svg+xml', '.txt': 'text/plain',
+    '.ttf': 'font/ttf', '.wav': 'audio/wav', '.weba': 'audio/webm', '.webm': 'video/webm', '.webp': 'image/webp',
+    '.xhtml': 'application/xhtml+xml', '.xml': 'application/xml', '.zip': 'application/zip', '.ts': 'video/mp2t',
+    '.tif': 'image/tiff', '.tiff': 'image/tiff', '.otf': 'font/otf', '.aac': 'audio/aac', '.rtf': 'application/rtf',
+    '.avi': 'video/x-msvideo', '.bz': 'application/x-bzip', '.bz2': 'application/x-bzip2', '.ico': 'image/vnd.microsoft.icon',
+    '.mid': 'audio/midi', '.midi': 'audio/x-midi', '.bz': 'application/x-bzip', '.bz2': 'application/x-bzip2',
+    '.mp3': 'audio/mpeg', '.mp4': 'video/mp4', '.mpeg': 'video/mpeg',
 }
 
 class Server:
     
-    def __init__(self, network):
+    def __init__(self):
         
         
-        self.network = network
         self.middlewares = []
         
-        self.__regex_type = type(re.compile(""))
+        # self.__regex_type = type(re.compile(""))
         self.__server = None
         
     def __route_middleware(self, route, middleware, complete_match=True):
@@ -184,8 +148,6 @@ class Server:
         if self.__server != None:
             raise ABServerError("server already started")
 
-        if not self.network.isconnected():
-            raise NetworkError("network not connected")
         self.ip = ip
         self.port = port
         await self.__listen(ip, port)
