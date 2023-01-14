@@ -1,5 +1,10 @@
+import os
+try:
+    os.uname().sysname
+    import uasyncio as asyncio
+except:
+    import asyncio
 import socket
-import uasyncio
 import re
 import json
 import gc
@@ -207,7 +212,7 @@ class Server:
             
     def __exception_handler(self, loop, context):
         exception = context["exception"]
-        if exception is uasyncio.CancelledError:
+        if exception is asyncio.CancelledError:
             print("stopping server")
             loop.close()
         elif type(exception) is OSError and exception.errno == 104:
@@ -219,8 +224,8 @@ class Server:
                        
     async def __listen(self, ip, port):
         self.__address = socket.getaddrinfo(ip, port)[0][-1]
-        uasyncio.Loop.set_exception_handler(self.__exception_handler)
-        self.__server = await uasyncio.start_server(self.__handle_request, host = ip, port = port)
+        asyncio.get_event_loop().set_exception_handler(self.__exception_handler)
+        self.__server = await asyncio.start_server(self.__handle_request, host = ip, port = port)
     
     async def __handle_request(self, reader, writer):
         gc.collect()
@@ -240,7 +245,7 @@ class Server:
         for middleware in self.middlewares:
             await middleware(requestObj, responseObj)
             
-        if not responseObj.__has_responded:
+        if not responseObj.has_responded:
                 responseObj.status("404 Not Found")
                 responseObj.end('404 Not Found')
         await responseObj.close()  
@@ -256,7 +261,7 @@ class Response:
         }
         self.__start_response = False
         self.__headers_sent = False
-        self.__has_responded = False    
+        self.has_responded = False    
 
     def set_header(self, key, value):
         self.headers[key] = value
@@ -322,7 +327,7 @@ class Response:
         else:
             self.__http_write(content)
             self.__http_write("")
-        self.__has_responded = True       
+        self.has_responded = True       
     
     async def close(self):
         await self.writer.drain()
@@ -341,9 +346,13 @@ class Response:
         self.__write("\r\n")
         
     def __write(self, data):
-        if self.__has_responded:
+        if self.has_responded:
             raise AlreadyRespondedError("Already responded to this request")
-        self.writer.write(data)
+        if(type(data) is str):
+            self.writer.write(bytes(data, 'utf-8'))
+        else:
+            self.writer.write(data)
+        
     
     
 class Request:
