@@ -235,9 +235,10 @@ class Server:
             await writer.wait_closed()
             return
         
-        responseObj = Response(writer)
+        addr = writer.get_extra_info('peername')
+        responseObj = Response(writer, addr)
         try:
-            requestObj = Request(request)
+            requestObj = Request(request, addr)
         except InvalidRequestError as e:
             responseObj.status('400 Bad Request')
             responseObj.end()
@@ -251,7 +252,7 @@ class Server:
         await responseObj.close()  
             
 class Response:
-    def __init__(self, writer):
+    def __init__(self, writer, address):
         self.writer = writer
         self.__version = 'HTTP/1.1'
         self.__status = '200 OK'
@@ -259,6 +260,7 @@ class Response:
             'X-Powered-By': 'AB-Server',
             'Content-Type': 'text/html'
         }
+        self.address = address
         self.__start_response = False
         self.__headers_sent = False
         self.has_responded = False    
@@ -356,8 +358,9 @@ class Response:
     
     
 class Request:
-    def __init__(self, request):
+    def __init__(self, request, address):
         self.request = request.decode()
+        self.address = address
         self.__parse_request()
     
     def __parse_request(self):

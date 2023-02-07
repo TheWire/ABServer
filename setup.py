@@ -3,9 +3,9 @@ from setuptools import find_packages, setup
 setup(
     name="ABServer",
     packages=find_packages(include=["ABServer"]),
-    version="1.0.0",
+    version="1.0.1",
     description="simple python/micropython web server/framework",
     author="Andrew Barber",
-    license="MIT",
+    license="GPLV2",
     install_requires=[],
 )
