@@ -175,13 +175,17 @@ class Server:
                 response.send_file(join_path(static_file_path, sanitized_path))
         return __static
 
+    def __parse_contentType(self, header):
+        contentType = header.split(';', 1)
+        return contentType[0].strip(), contentType[1].strip() if len(contentType) == 2 else ""
+
     def json_body_parser(self):
         def __json(request, response):
             try: request.body
             except: request.body = {}
-            
-            if ("Content-Type", MIME_TYPES[".json"]) not in request.headers.items(): return
-
+            if request.headers.get("Content-Type") == None: return
+            contentType, _ = self.__parse_contentType(request.headers["Content-Type"])
+            if contentType != MIME_TYPES[".json"]: return
             try:
                 request.body = json.loads(request.raw_body)
             except:
