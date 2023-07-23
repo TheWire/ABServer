@@ -166,7 +166,7 @@ class Server:
         self.__server = None
         print("server stopped")
 
-    def static(self, static_file_path):
+    def static(self, static_file_path, gz_as_compressed=False):
         def __static (request, response):
             if(request.method == 'GET'):
                 #look at this again
@@ -298,10 +298,18 @@ class Response:
             self.__http_write(content)
         self.end()
 
-    def send_file(self, filepath):
+
+    def send_file(self, filepath, gz_as_compressed=False):
+
+        file, compressed = get_file(filepath)
+        if compressed and gz_as_compressed: 
+            self.set_header('Content-Encoding', 'gzip')
+        extension = get_extension(filepath, compressed and gz_as_compressed)
+        self.set_header('Content-Type', get_mime(extension))
+        
+
+        
         try:
-            file = open(filepath, "r")
-            self.set_header('Content-Type', get_mime(filepath))
             gc.collect()
             while True:
                 data = file.read(1024)
@@ -461,14 +469,35 @@ URL_ESCAPE = {
     "%3A": ":", "%40": "@", "%3D": "=", "%26": "&", "%24": "$",
 }
 
-def get_mime(file_name):
-    extension_match = re.search('.[A-Za-z0-9]+$', file_name)
-    if extension_match is not None:
-        extension = extension_match.group(0).lower()
-        if extension in MIME_TYPES:
-            return MIME_TYPES[extension]
-        else:
-            return 'text/html'
+# return file and if compressed
+def get_file(filepath):
+    try:
+        file = open(filepath, "r")
+        return (file, False)
+    except:
+        pass
+    try:
+        file = open(filepath + ".gz", "r")
+        return (file, True)
+    except:
+        return (None, False)
+
+# if compressedn=True return ext from file.ext.gz
+def get_extension(file_name, compressed=False):
+    extension_match = re.split("\.", file_name)
+    length = len(extension_match)
+    if length < 2: return None
+
+    if compressed and length > 2:
+        return extension_match[length-2]
+    return extension_match[length-1]
+
+def get_mime(extension):
+    if extension is None: "application/octet-stream"
+    if extension.lower in MIME_TYPES:
+        return MIME_TYPES[extension]
+    else:
+        return "application/octet-stream"
 
 def sanitize_path(path, strict=False):
     sanitized_path = path.replace("..", ".")
