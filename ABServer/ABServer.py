@@ -22,6 +22,26 @@ MIME_TYPES = {
     '.mp3': 'audio/mpeg', '.mp4': 'video/mp4', '.mpeg': 'video/mpeg',
 }
 
+class ABServerError(Exception):
+    pass
+
+class NetworkError(ABServerError):
+    pass
+
+class InvalidRequestError(ABServerError):
+    pass
+
+class AlreadyRespondedError(ABServerError):
+    pass
+
+class FilePathError(ABServerError):
+    pass
+
+class Comp_File_Policy:
+    NO_COMP = 1
+    GZ_COMP = 2
+    ALL_COMP = 3
+
 class Server:
     
     def __init__(self):
@@ -166,13 +186,16 @@ class Server:
         self.__server = None
         print("server stopped")
 
-    def static(self, static_file_path, gz_as_compressed=False):
+    def static(self, static_file_path, compressed_file_policy=Comp_File_Policy.NO_COMP):
         def __static (request, response):
             if(request.method == 'GET'):
                 #look at this again
                 file_name = re.search('[A-Za-z0-9_.,%$£-]+$', request.route).group(0)
                 sanitized_path = sanitize_path(file_name)
-                response.send_file(join_path(static_file_path, sanitized_path))
+                joined_path = join_path(static_file_path, sanitized_path)
+                final_path, compressed = get_file_to_send(joined_path, compressed_file_policy)
+                if compressed: response.set_header('Content-Encoding', 'gzip')
+                response.send_file(final_path)
         return __static
 
     def __parse_contentType(self, header):
@@ -183,8 +206,8 @@ class Server:
         def __json(request, response):
             try: request.body
             except: request.body = {}
-            if request.headers.get("Content-Type") == None: return
-            contentType, _ = self.__parse_contentType(request.headers["Content-Type"])
+            if request.headers.get("content-type") == None: return
+            contentType, _ = self.__parse_contentType(request.headers["content-type"])
             if contentType != MIME_TYPES[".json"]: return
             try:
                 request.body = json.loads(request.raw_body)
@@ -197,7 +220,7 @@ class Server:
             try: request.body
             except: request.body = {}
             request.body = {}
-            if ("Content-Type", "application/x-www-form-urlencoded") not in request.headers.items(): return
+            if ("content-ype", "application/x-www-form-urlencoded") not in request.headers.items(): return
             request.body = parse_query(request.raw_body)
         return __url_encoded
 
@@ -256,6 +279,7 @@ class Server:
         await responseObj.close()  
             
 class Response:
+
     def __init__(self, writer, address):
         self.writer = writer
         self.__version = 'HTTP/1.1'
@@ -281,7 +305,7 @@ class Response:
             
     def __http_send_header(self, key, value):
         header = key + ': ' + value
-        self.__write(header)
+        self.__write(header.lower())
         self.__write("\r\n")
             
     def __http_send_headers(self):
@@ -300,16 +324,11 @@ class Response:
 
 
     def send_file(self, filepath, gz_as_compressed=False):
-
-        file, compressed = get_file(filepath)
-        if compressed and gz_as_compressed: 
-            self.set_header('Content-Encoding', 'gzip')
-        extension = get_extension(filepath, compressed and gz_as_compressed)
-        self.set_header('Content-Type', get_mime(extension))
-        
-
-        
+        extension, compressed = get_extension(filepath, gz_as_compressed)
         try:
+            file = open(filepath, "r")
+            if compressed: self.set_header('Content-Encoding', 'gzip')
+            self.set_header('Content-Type', get_mime(extension))
             gc.collect()
             while True:
                 data = file.read(1024)
@@ -347,6 +366,20 @@ class Response:
         await self.writer.drain()
         self.writer.close()
         await self.writer.wait_closed()
+
+        # return file and compressed file
+    def __get_file(filepath):
+        file = None
+        comp_file = None
+        try:
+            file = open(filepath, "r")
+        except:
+            pass
+        try:
+            comp_file = open(filepath + ".gz", "r")
+        except:
+            pass
+        return (file, comp_file)
         
     def __http_start_response(self):
         if self.__start_response: return
@@ -366,6 +399,7 @@ class Response:
             self.writer.write(bytes(data, 'utf-8'))
         else:
             self.writer.write(data)
+
         
     
     
@@ -416,7 +450,7 @@ class Request:
     def __parse_header(self, raw_header):
         header = raw_header.split(':', 1)
         if len(header) < 2: return None, None
-        return header[0].strip(), header[1].strip()
+        return header[0].strip().lower(), header[1].strip().lower()
 
     
 
@@ -425,25 +459,32 @@ class Request:
         return self.request
 
    
-class ABServerError(Exception):
-    pass
-
-class NetworkError(ABServerError):
-    pass
-
-class InvalidRequestError(ABServerError):
-    pass
-
-class AlreadyRespondedError(ABServerError):
-    pass
-
-class FilePathError(ABServerError):
-    pass
-
 
 #helper functions
 
 #good enough to identify awaitable function
+
+def files_exist(filepath):
+    file = None
+    comp_file = None
+    try:
+        os.stat(filepath)
+        file = filepath
+    except:
+        pass
+    try:
+        os.stat(filepath + ".gz")
+        comp_file = filepath + ".gz"
+    except:
+        pass
+    return (file, comp_file)
+
+def get_file_to_send(filepath, comp_file_policy):
+    file, comp_file = files_exist(filepath)
+    if comp_file_policy == Comp_File_Policy.NO_COMP: return (file, False)
+    if comp_file_policy == Comp_File_Policy.ALL_COMP: return (file, True) if file is not None else (comp_file, True)
+    if comp_file_policy == Comp_File_Policy.GZ_COMP: return (comp_file, True) if comp_file is not None else (file, False)
+
 def iscoroutine(obj):
     return hasattr(obj, "send")
 
@@ -469,28 +510,16 @@ URL_ESCAPE = {
     "%3A": ":", "%40": "@", "%3D": "=", "%26": "&", "%24": "$",
 }
 
-# return file and if compressed
-def get_file(filepath):
-    try:
-        file = open(filepath, "r")
-        return (file, False)
-    except:
-        pass
-    try:
-        file = open(filepath + ".gz", "r")
-        return (file, True)
-    except:
-        return (None, False)
-
-# if compressedn=True return ext from file.ext.gz
+# if compressed=True return ext from file.ext.gz
+# if file.ext.gz return compressed as second tuple value
 def get_extension(file_name, compressed=False):
     extension_match = re.split("\.", file_name)
     length = len(extension_match)
-    if length < 2: return None
+    if length < 2: return (None, False)
 
     if compressed and length > 2:
-        return extension_match[length-2]
-    return extension_match[length-1]
+        return (extension_match[length-2], True)
+    return (extension_match[length-1], False)
 
 def get_mime(extension):
     if extension is None: "application/octet-stream"
