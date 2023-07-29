@@ -10,16 +10,16 @@ import json
 import gc
 
 MIME_TYPES = {
-    '.html': 'text/html', '.htm': 'text/html', '.css': 'text/css', '.js': 'text/javascript',
-    '.json': 'application/json', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
-    '.gz': 'application/gzip', '.csv': 'text/csv', '.bmp': 'image/bmp', '.png': 'image/png',
-    '.pdf': 'application/pdf', '.sh': 'application/x-sh', '.svg': 'image/svg+xml', '.txt': 'text/plain',
-    '.ttf': 'font/ttf', '.wav': 'audio/wav', '.weba': 'audio/webm', '.webm': 'video/webm', '.webp': 'image/webp',
-    '.xhtml': 'application/xhtml+xml', '.xml': 'application/xml', '.zip': 'application/zip', '.ts': 'video/mp2t',
-    '.tif': 'image/tiff', '.tiff': 'image/tiff', '.otf': 'font/otf', '.aac': 'audio/aac', '.rtf': 'application/rtf',
-    '.avi': 'video/x-msvideo', '.bz': 'application/x-bzip', '.bz2': 'application/x-bzip2', '.ico': 'image/vnd.microsoft.icon',
-    '.mid': 'audio/midi', '.midi': 'audio/x-midi', '.bz': 'application/x-bzip', '.bz2': 'application/x-bzip2',
-    '.mp3': 'audio/mpeg', '.mp4': 'video/mp4', '.mpeg': 'video/mpeg',
+    'html': 'text/html', 'htm': 'text/html', 'css': 'text/css', 'js': 'text/javascript',
+    'json': 'application/json', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'gif': 'image/gif',
+    'gz': 'application/gzip', 'csv': 'text/csv', 'bmp': 'image/bmp', 'png': 'image/png',
+    'pdf': 'application/pdf', 'sh': 'application/x-sh', 'svg': 'image/svg+xml', 'txt': 'text/plain',
+    'ttf': 'font/ttf', 'wav': 'audio/wav', 'weba': 'audio/webm', 'webm': 'video/webm', 'webp': 'image/webp',
+    'xhtml': 'application/xhtml+xml', 'xml': 'application/xml', 'zip': 'application/zip', 'ts': 'video/mp2t',
+    'tif': 'image/tiff', 'tiff': 'image/tiff', 'otf': 'font/otf', 'aac': 'audio/aac', 'rtf': 'application/rtf',
+    'avi': 'video/x-msvideo', 'bz': 'application/x-bzip', 'bz2': 'application/x-bzip2', 'ico': 'image/vnd.microsoft.icon',
+    'mid': 'audio/midi', 'midi': 'audio/x-midi', 'bz': 'application/x-bzip', 'bz2': 'application/x-bzip2',
+    'mp3': 'audio/mpeg', 'mp4': 'video/mp4', 'mpeg': 'video/mpeg',
 }
 
 class ABServerError(Exception):
@@ -211,7 +211,7 @@ class Server:
             except: request.body = {}
             if request.headers.get("content-type") == None: return
             contentType, _ = self.__parse_contentType(request.headers["content-type"])
-            if contentType != MIME_TYPES[".json"]: return
+            if contentType != MIME_TYPES["json"]: return
             try:
                 request.body = json.loads(request.raw_body)
             except:
@@ -328,18 +328,14 @@ class Response:
 
 
     def send_file(self, filepath, gz_as_compressed=False):
-        print(filepath)
-        print(gz_as_compressed)
         extension, compressed = get_extension(filepath, gz_as_compressed)
-        print(extension)
-        print(compressed)
         try:
-            file = open(filepath, "r")
+            file = open(filepath, "rb")
             if compressed: self.set_header('Content-Encoding', 'gzip')
             self.set_header('Content-Type', get_mime(extension))
             gc.collect()
             while True:
-                data = file.read(1024)
+                data = file.read(512)
                 if len(data) == 0:
                     file.close()
                     return
@@ -509,13 +505,12 @@ URL_ESCAPE = {
 # if file.ext.gz return compressed as second tuple value
 def get_extension(file_name, gz_as_compressed=False):
     extension_match = file_name.split(".")
-    print(extension_match)
     length = len(extension_match)
     if length < 2: return (None, False)
 
-    if gz_as_compressed and length > 2:
-        return (extension_match[length-2], True)
-    return (extension_match[length-1], False)
+    if gz_as_compressed and length > 2 and extension_match[-1].lower() == "gz":
+        return (extension_match[-2], True)
+    return (extension_match[-1], False)
 
 def get_mime(extension):
     if extension is None: return "application/octet-stream"
