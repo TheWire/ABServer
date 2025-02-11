@@ -187,7 +187,7 @@ class Server:
         print("server stopped")
 
     def static(self, static_file_path, compressed_file_policy=Comp_File_Policy.NO_COMP):
-        def __static (request, response):
+        async def __static (request, response):
             if(request.method == 'GET'):
                 #look at this again
                 file_name = re.search('[A-Za-z0-9_.,%$£-]+$', request.route).group(0)
@@ -196,9 +196,9 @@ class Server:
                 final_path, compressed = get_file_to_send(joined_path, compressed_file_policy)
                 if final_path is None:
                     response.status("404 Not Found")
-                    response.end()
+                    await response.end()
                 if compressed: response.set_header('Content-Encoding', 'gzip')
-                response.send_file(final_path, compressed_file_policy)
+                await response.send_file(final_path, compressed_file_policy)
         return __static
 
     def __parse_contentType(self, header):
@@ -228,7 +228,7 @@ class Server:
         return __url_encoded
 
     def cors(self):
-        def __cors(request, response):
+        async def __cors(request, response):
             response.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             response.set_header("Access-Control-Allow-Origin", "*")
             response.set_header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept")
@@ -237,7 +237,7 @@ class Server:
                 response.set_header("Access-Control-Allow-Methods","*")
                 response.set_header("Access-Control-Allow-Credentials", "true")
                 response.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
-                response.end()
+                await response.end()
         return __cors
             
     def __exception_handler(self, loop, context):
@@ -261,7 +261,7 @@ class Server:
         gc.collect()
         request = await reader.read(4096)
         if request is None or request == b'':
-            writer.close()
+            await writer.close()
             await writer.wait_closed()
             return
         
@@ -271,14 +271,14 @@ class Server:
             requestObj = Request(request, addr)
         except InvalidRequestError as e:
             responseObj.status('400 Bad Request')
-            responseObj.end()
+            await responseObj.end()
 
         for middleware in self.middlewares:
             await middleware(requestObj, responseObj)
             
         if not responseObj.has_responded:
                 responseObj.status("404 Not Found")
-                responseObj.end('404 Not Found')
+                await responseObj.end('404 Not Found')
         await responseObj.close()  
             
 class Response:
@@ -306,28 +306,28 @@ class Response:
     def set(self, headers):
         self.headers.update(headers)
             
-    def __http_send_header(self, key, value):
+    async def __http_send_header(self, key, value):
         header = key + ': ' + value
         # self.__write(header.lower() if header is not None else "")
-        self.__write(header)
-        self.__write("\r\n")
+        await self.__write(header)
+        await self.__write("\r\n")
             
-    def __http_send_headers(self):
+    async def __http_send_headers(self):
         if self.__headers_sent: return
         for key, value in self.headers.items():
-            self.__http_send_header(key, value)
+            await self.__http_send_header(key, value)
         self.__headers_sent = True
-        self.__write("\r\n")
+        await self.__write("\r\n")
         
-    def send(self, content):
+    async def send(self, content):
         if ("Transfer-Encoding", "chunked") in self.headers.items():
-            self.write(content)
+            await self.write(content)
         else:
-            self.__http_write(content)
-        self.end()
+            await self.__http_write(content)
+        await self.end()
 
 
-    def send_file(self, filepath, gz_as_compressed=False):
+    async def send_file(self, filepath, gz_as_compressed=False):
         extension, compressed = get_extension(filepath, gz_as_compressed)
         try:
             file = open(filepath, "rb")
@@ -340,7 +340,7 @@ class Response:
                     file.close()
                     return
                     
-                self.write(data)
+                await self.write(data)
         except OSError as e:
             if e.errno == 2:
                 self.status("404 Not Found")
@@ -350,21 +350,21 @@ class Response:
             print(e2)
             self.status("500 Internal Server Error")
         finally:
-            self.end()
+            await self.end()
         
-    def write(self, content):
+    async def write(self, content):
         self.set_header("Transfer-Encoding", "chunked")
-        self.__http_write("%x" % len(content))
-        self.__http_write(content)
+        await self.__http_write("%x" % len(content))
+        await self.__http_write(content)
         
-    def end(self, content=""):
+    async def end(self, content=""):
         if ("Transfer-Encoding", "chunked") in self.headers.items():
             if content != "":
-                self.write(content)
-            self.write("")
+                await self.write(content)
+            await self.write("")
         else:
-            self.__http_write(content)
-            self.__http_write("")
+            await self.__http_write(content)
+            await self.__http_write("")
         self.has_responded = True       
     
     async def close(self):
@@ -372,24 +372,25 @@ class Response:
         self.writer.close()
         await self.writer.wait_closed()
         
-    def __http_start_response(self):
+    async def __http_start_response(self):
         if self.__start_response: return
-        self.__write(' '.join([self.__version, self.__status]) + "\r\n")
+        await self.__write(' '.join([self.__version, self.__status]) + "\r\n")
         self.__start_response = True
         
-    def __http_write(self, data):
-        self.__http_start_response()
-        self.__http_send_headers()
-        self.__write(data)
-        self.__write("\r\n")
+    async def __http_write(self, data):
+        await self.__http_start_response()
+        await self.__http_send_headers()
+        await self.__write(data)
+        await self.__write("\r\n")
         
-    def __write(self, data):
+    async def __write(self, data):
         if self.has_responded:
             raise AlreadyRespondedError("Already responded to this request")
         if(type(data) is str):
             self.writer.write(bytes(data, 'utf-8'))
         else:
             self.writer.write(data)
+        await self.writer.drain()
 
         
     
