@@ -258,10 +258,11 @@ class Server:
         self.__server = await asyncio.start_server(self.__handle_request, host = ip, port = port)
     
     async def __handle_request(self, reader, writer):
-        gc.collect()
+        #gc.collect()
         request = await reader.read(4096)
         if request is None or request == b'':
-            await writer.close()
+            print(f"close{writer}")
+            writer.close()
             await writer.wait_closed()
             return
         
@@ -272,6 +273,8 @@ class Server:
         except InvalidRequestError as e:
             responseObj.status('400 Bad Request')
             await responseObj.end()
+            await responseObj.close()
+            return
 
         for middleware in self.middlewares:
             await middleware(requestObj, responseObj)
@@ -294,7 +297,8 @@ class Response:
         self.address = address
         self.__start_response = False
         self.__headers_sent = False
-        self.has_responded = False    
+        self.has_responded = False
+        self.lock = asyncio.Lock()
 
     def set_header(self, key, value):
         self.headers[key] = value
@@ -313,11 +317,12 @@ class Response:
         await self.__write("\r\n")
             
     async def __http_send_headers(self):
-        if self.__headers_sent: return
-        for key, value in self.headers.items():
-            await self.__http_send_header(key, value)
-        self.__headers_sent = True
-        await self.__write("\r\n")
+        async with self.lock:
+            if self.__headers_sent: return
+            for key, value in self.headers.items():
+                await self.__http_send_header(key, value)
+            self.__headers_sent = True
+            await self.__write("\r\n")
         
     async def send(self, content):
         if ("Transfer-Encoding", "chunked") in self.headers.items():
@@ -347,15 +352,19 @@ class Response:
             else:
                 self.status("500 Internal Server Error")
         except Exception as e2:
-            print(e2)
+            (e2)
             self.status("500 Internal Server Error")
         finally:
             await self.end()
         
     async def write(self, content):
         self.set_header("Transfer-Encoding", "chunked")
-        await self.__http_write("%x" % len(content))
-        await self.__http_write(content)
+        to_write = bytes("%x\r\n" % len(content), "UTF-8")
+        if (type(content) is str):
+            to_write += bytes(content, "UTF-8")
+        else:
+            to_write += content
+        await self.__http_write(to_write)
         
     async def end(self, content=""):
         if ("Transfer-Encoding", "chunked") in self.headers.items():
@@ -380,8 +389,7 @@ class Response:
     async def __http_write(self, data):
         await self.__http_start_response()
         await self.__http_send_headers()
-        await self.__write(data)
-        await self.__write("\r\n")
+        await self.__write(data + "\r\n")
         
     async def __write(self, data):
         if self.has_responded:
@@ -404,7 +412,6 @@ class Request:
     def __parse_request(self):
         self.raw_request = self.request.splitlines()
         if len(self.raw_request) < 2: raise InvalidRequestError("invalid http request")
-
         self.request_line = self.raw_request[0].split(' ')
         if len(self.request_line) < 3: raise InvalidRequestError("invalid http request")
         self.method = self.request_line[0].upper()
