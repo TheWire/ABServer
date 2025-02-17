@@ -261,7 +261,6 @@ class Server:
         #gc.collect()
         request = await reader.read(4096)
         if request is None or request == b'':
-            print(f"close{writer}")
             writer.close()
             await writer.wait_closed()
             return
