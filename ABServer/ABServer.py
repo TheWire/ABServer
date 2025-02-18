@@ -256,19 +256,58 @@ class Server:
         self.__address = socket.getaddrinfo(ip, port)[0][-1]
         asyncio.get_event_loop().set_exception_handler(self.__exception_handler)
         self.__server = await asyncio.start_server(self.__handle_request, host = ip, port = port)
-    
+
+    def __parse_request_line(self, request_line):
+        lines = str(request_line).split(" ")
+        if len(lines) < 2:
+            raise InvalidRequestError("invalid http request")
+        method = lines[0].upper()
+        route = lines[1].lower()
+        version = lines[2].upper()
+        return method, route, version
+
+    def __parse_headers(self, header_block):
+        headers = {}
+        for header in header_block:
+            key, value = self.__parse_header(header)
+            if key == None: continue
+            headers[key] = value
+        return headers
+
+    def __parse_header(self, raw_header):
+        header = raw_header.split(':', 1)
+        if len(header) < 2: return None, None
+        return header[0].strip().lower(), header[1].strip().lower()
+
     async def __handle_request(self, reader, writer):
         #gc.collect()
-        request = await reader.read(4096)
-        if request is None or request == b'':
-            writer.close()
-            await writer.wait_closed()
-            return
+        request_line = await reader.readline()
+        method_line = self.__parse_request_line(str(request_line))
+        print(method_line)
+        raw_headers = []
+        while True:
+            header = await reader.readline()
+            if header == b'\r\n' or header == b'':
+                break
+            raw_headers.append(str(header))
+        headers = self.__parse_headers(raw_headers)
+        print(headers)
+        content_length = headers.get('content-length')
+        print(content_length)
+        body = b''
+        if content_length is not None:
+            print(content_length)
+            body = await reader.read(int(content_length))
+        # if request is None or request == b'':
+        #     writer.close()
+        #     await writer.wait_closed()
+        #     return
         
         addr = writer.get_extra_info('peername')
         responseObj = Response(writer, addr)
         try:
-            requestObj = Request(request, addr)
+            requestObj = Request(body, addr, headers, *method_line)
+            print(Request)
         except InvalidRequestError as e:
             responseObj.status('400 Bad Request')
             await responseObj.end()
@@ -400,35 +439,20 @@ class Response:
         await self.writer.drain()
 
         
-    
-    
 class Request:
-    def __init__(self, request, address):
-        self.request = request.decode()
+    def __init__(self, body, address, headers, method, route, version):
+        self.raw_body = body
         self.address = address
+        self.method = method
+        self.route = route
+        self.version = version
+        self.headers = headers
         self.__parse_request()
     
     def __parse_request(self):
-        self.raw_request = self.request.splitlines()
-        if len(self.raw_request) < 2: raise InvalidRequestError("invalid http request")
-        self.request_line = self.raw_request[0].split(' ')
-        if len(self.request_line) < 3: raise InvalidRequestError("invalid http request")
-        self.method = self.request_line[0].upper()
-        self.route = self.request_line[1].lower()
         self.url_parts, query = self.__get_route_parser(self.route)
         if query != None:
             self.query = parse_query(query)
-        self.version = self.request_line[2]
-        self.headers = {}
-        header_end = -1
-        for idx, line in enumerate(self.raw_request):
-            if line == "":
-                header_end = idx
-                break
-        if header_end == -1:
-            raise InvalidRequestError("invalid http request")
-        self.headers = self.__parse_headers(self.raw_request[1:header_end])
-        self.raw_body = '\n'.join(self.raw_request[header_end+1:])
 
     def __get_route_parser(self, route):
         url_query = route.split("?", 1)
@@ -436,22 +460,6 @@ class Request:
         if len(url_query) > 2:
             return parts, url_query[1]
         return parts, None
-
-    def __parse_headers(self, header_block):
-        headers = {}
-        for header in header_block:
-            key, value = self.__parse_header(header)
-            if key == None: continue
-            headers[key] = value
-        return headers
-
-    def __parse_header(self, raw_header):
-        header = raw_header.split(':', 1)
-        if len(header) < 2: return None, None
-        return header[0].strip().lower(), header[1].strip().lower()
-
-    
-
 
     def __str__(self):
         return self.request
