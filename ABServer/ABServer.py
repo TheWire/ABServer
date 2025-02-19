@@ -215,7 +215,7 @@ class Server:
             try:
                 request.body = json.loads(request.raw_body)
             except:
-                pass
+                print("json parser error")
         return __json
 
     def url_encoded_body_parser(self):
@@ -258,7 +258,7 @@ class Server:
         self.__server = await asyncio.start_server(self.__handle_request, host = ip, port = port)
 
     def __parse_request_line(self, request_line):
-        lines = str(request_line).split(" ")
+        lines = request_line.split(" ")
         if len(lines) < 2:
             raise InvalidRequestError("invalid http request")
         method = lines[0].upper()
@@ -280,34 +280,28 @@ class Server:
         return header[0].strip().lower(), header[1].strip().lower()
 
     async def __handle_request(self, reader, writer):
-        #gc.collect()
-        request_line = await reader.readline()
-        method_line = self.__parse_request_line(str(request_line))
-        print(method_line)
-        raw_headers = []
-        while True:
-            header = await reader.readline()
-            if header == b'\r\n' or header == b'':
-                break
-            raw_headers.append(str(header))
-        headers = self.__parse_headers(raw_headers)
-        print(headers)
-        content_length = headers.get('content-length')
-        print(content_length)
-        body = b''
-        if content_length is not None:
-            print(content_length)
-            body = await reader.read(int(content_length))
-        # if request is None or request == b'':
-        #     writer.close()
-        #     await writer.wait_closed()
-        #     return
-        
-        addr = writer.get_extra_info('peername')
-        responseObj = Response(writer, addr)
         try:
+            request_line = await reader.readline()
+            method_line = self.__parse_request_line(request_line.decode("UTF-8")) 
+            raw_headers = []
+            while True:
+                header = await reader.readline()
+                if header == b'\r\n' or header == b'':
+                    break
+                raw_headers.append(header.decode("UTF-8"))
+            headers = self.__parse_headers(raw_headers)
+            content_length = headers.get('content-length')
+            body = b''
+            if content_length is not None:
+                body = await reader.readexactly(int(content_length))
+            # if request is None or request == b'':
+            #     writer.close()
+            #     await writer.wait_closed()
+            #     return
+            
+            addr = writer.get_extra_info('peername')
+            responseObj = Response(writer, addr)
             requestObj = Request(body, addr, headers, *method_line)
-            print(Request)
         except InvalidRequestError as e:
             responseObj.status('400 Bad Request')
             await responseObj.end()
