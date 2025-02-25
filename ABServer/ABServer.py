@@ -303,9 +303,11 @@ class Server:
             responseObj = Response(writer, addr)
             requestObj = Request(body, addr, headers, *method_line)
         except InvalidRequestError as e:
-            responseObj.status('400 Bad Request')
-            await responseObj.end()
-            await responseObj.close()
+            writer.close()
+            await writer.wait_closed()
+            # responseObj.status('400 Bad Request')
+            # await responseObj.end()
+            # await responseObj.close()
             return
 
         for middleware in self.middlewares:
